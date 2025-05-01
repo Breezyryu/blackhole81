@@ -15,7 +15,7 @@ aliases:
 - EPF
 CMDS: "[[📚 104 Terminologies]]"
 index: "[[🏷 Research Notes]]"
-author: "[[구요한]]"
+author: "[[류성택]]"
 ---
 ## 전극 다공성 형성 (Electrode Porosity Forming)
 #### What is Electrode Porosity Forming
@@ -83,4 +83,4 @@ author: "[[구요한]]"
 - [[배터리 성능 (Battery Performance)]] #BatteryPerformance
 	- 전극 다공성은 배터리의 출력 특성과 에너지 밀도에 직접적인 영향을 미침
 - [[전해질 특성 (Electrolyte Properties)]] #ElectrolyteProperties
-	- 전해질의 전도도와 리튬염 농도는 EPF 구조에서의 이온 이동에 중요한 영향을 미침 
+	- 전해질의 전도도와 리튬염 농도는 EPF 구조에서의 이온 이동에 중요한 영향을 미침

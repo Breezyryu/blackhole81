@@ -1,21 +1,21 @@
 ---
 tags:
-- 배터리기술
-- 리튬이온배터리
-- 재료분석
-- 전기화학
-- 에너지저장장치
-- BatteryTechnology
-- LithiumIonBattery
-- MaterialAnalysis
-- Electrochemistry
-- EnergyStorageDevice
+  - 배터리기술
+  - 리튬이온배터리
+  - 재료분석
+  - 전기화학
+  - 에너지저장장치
+  - BatteryTechnology
+  - LithiumIonBattery
+  - MaterialAnalysis
+  - Electrochemistry
+  - EnergyStorageDevice
 aliases:
-- BET Analysis
-- COSMX Development
+  - BET Analysis
+  - COSMX Development
 CMDS: "[[📚 104 Terminologies]]"
 index: "[[🏷 Research Notes]]"
-author: "[[류성택택]]"
+author: "[[류성택]]"
 ---
 ## BET 분석 (Brunauer-Emmett-Teller Analysis)
 #### What is BET Analysis
