@@ -4,7 +4,7 @@ type:
 aliases:
   - CMDS HQ
 author:
-  - "[[70. Collections/71. People/구요한]]"
+  - "[[70. Collections/71. People/류성택]]"
 date created: Sunday, February 25th 2024, 11:43:40 am
 date modified: Sunday, January 5th 2025, 6:18:52 pm
 tags:

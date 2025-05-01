@@ -118,7 +118,7 @@ aliases:
 - Template for Academic Sharing
 CMDS: "[[📚 104 Terminologies]]"
 index: "[[🏷 Research Notes]]"
-author: "[[구요한]]"
+author: "[[류성택]]"
 ---
 ## 지식 공유 (Knowledge Sharing)
 #### What is Knowledge Sharing
