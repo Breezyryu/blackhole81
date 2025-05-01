@@ -1,0 +1,624 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import re
+import tkinter as tk
+from tkinter import filedialog
+import bisect
+from matplotlib.widgets import Slider, Button, RectangleSelector
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Optional, Any, Union
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger("PNE_Processor")
+
+# Constants
+TIME_DAY_COLUMN = 18
+TIME_HUNDREDTH_SEC_COLUMN = 19
+VOLTAGE_CURRENT_COLUMN = 9
+CYCLE_NUMBER_COLUMN = 27
+DAY_TO_HUNDREDTH_SEC = 8640000  # Conversion factor: 24*60*60*100
+
+@dataclass
+class ProfileData:
+    """Class for storing profile data for a channel."""
+    cycle_idx: int
+    profile: pd.DataFrame
+    subfolder: str
+
+
+class PNEDataProcessor:
+    """Class for processing PNE data files."""
+    
+    def __init__(self):
+        self.organized_data = {}
+        self.output_data = {}
+        self.merged_data = {}
+        self.inicycle = None
+        self.endcycle = None
+    
+    @staticmethod
+    def extract_capacity(folder_path: str) -> int:
+        """
+        Extract the capacity (mAh) from the top level folder path.
+        
+        Args:
+            folder_path: Path to the top level folder
+            
+        Returns:
+            Capacity value in mAh
+        """
+        # Get the top level folder name
+        top_folder = os.path.basename(os.path.normpath(folder_path))
+        
+        # Use regex to find the number before "mAh"
+        match = re.search(r'(\d+)mAh', top_folder)
+        if match:
+            return int(match.group(1))
+        else:
+            raise ValueError(f"Could not extract capacity from folder name: {top_folder}")
+
+    @staticmethod
+    def extract_channel_number(path: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Extract channel number from a path string.
+        
+        Args:
+            path: Path containing channel information
+            
+        Returns:
+            Tuple containing extracted channel number and channel ID
+        """
+        # Look for patterns like "M01Ch045[045]" or "M01Ch046[046]"
+        match = re.search(r'M\d+Ch(\d+)(?:\[(\d+)\])?', path)
+        if match:
+            # Return both the channel number and the number in brackets if available
+            channel = match.group(1)
+            channel_id = match.group(2) if match.group(2) else channel
+            return channel, channel_id
+        return None, None
+
+    def set_pne_paths(self) -> Tuple[List[str], List[str], List[int]]:
+        """
+        Set up paths for PNE data processing using a file dialog.
+        
+        Returns:
+            Tuple containing cyclename, cyclepath, and mincapacity lists
+        """
+        # Initialize tkinter
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        
+        # Ask user to select the TXT file
+        try:
+            # Try to use D:/Work_pc_D/datapath directory first
+            datafilepath = filedialog.askopenfilename(
+                initialdir=r"D:/Work_pc_D/datapath", 
+                title="Choose Test files", 
+                filetypes=[("Text files", "*.txt")]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to access default directory: {e}")
+            # Fall back to home directory if the specified directory is not accessible
+            datafilepath = filedialog.askopenfilename(
+                initialdir=os.path.expanduser("~"), 
+                title="Choose Test files", 
+                filetypes=[("Text files", "*.txt")]
+            )
+        
+        if not datafilepath:
+            raise ValueError("No file selected")
+        
+        # Read the CSV file with tab separator
+        try:
+            df = pd.read_csv(
+                datafilepath, 
+                sep="\t", 
+                engine="c", 
+                encoding="UTF-8", 
+                skiprows=1, 
+                on_bad_lines='skip'
+            )
+        except Exception as e:
+            logger.error(f"Failed to read file {datafilepath}: {e}")
+            raise
+        
+        # Extract cyclename and cyclepath
+        cyclename = df['cyclename'].tolist() if 'cyclename' in df.columns else []
+        cyclepath = df['cyclepath'].tolist() if 'cyclepath' in df.columns else []
+        
+        # Extract capacity from each cyclepath to create mincapacity list
+        mincapacity = []
+        for path in cyclepath:
+            try:
+                match = re.search(r'(\d+)mAh', path)
+                if match:
+                    capacity = int(match.group(1))
+                    mincapacity.append(capacity)
+                else:
+                    mincapacity.append(0)  # Default value if capacity not found
+            except Exception as e:
+                logger.warning(f"Error extracting capacity from {path}: {e}")
+                mincapacity.append(0)
+        
+        logger.info(f"Found {len(cyclepath)} cycle paths")
+        return cyclename, cyclepath, mincapacity
+
+    def pne_search_cycle(self, rawdir: str, inicycle: Optional[int] = None, endcycle: Optional[int] = None) -> Tuple[int, int]:
+        """
+        Search for cycle files in the specified directory within the given cycle range.
+        
+        Args:
+            rawdir: Directory containing the cycle files
+            inicycle: Initial cycle number to start from
+            endcycle: End cycle number to stop at
+            
+        Returns:
+            Tuple containing start and end file positions
+        """
+        if not os.path.isdir(rawdir):
+            logger.warning(f"Directory {rawdir} does not exist")
+            return -1, -1
+        
+        # Get all CSV files in the directory
+        try:
+            subfiles = [f for f in os.listdir(rawdir) if f.endswith(".csv")]
+        except Exception as e:
+            logger.error(f"Error listing files in {rawdir}: {e}")
+            return -1, -1
+        
+        # Directly find SaveEndData file
+        save_end_data_file = next((f for f in subfiles if "SaveEndData" in f), None)
+        
+        if not save_end_data_file:
+            logger.warning(f"No SaveEndData file found in {rawdir}")
+            return -1, -1
+        
+        try:
+            # Read SaveEndData file
+            df = pd.read_csv(
+                os.path.join(rawdir, save_end_data_file), 
+                sep=",", 
+                skiprows=0, 
+                engine="c", 
+                header=None, 
+                encoding="cp949", 
+                on_bad_lines='skip'
+            )
+            
+            # Determine cycle indices
+            if inicycle is not None:
+                # #27 is Total cycle number
+                index_min = df.loc[(df.loc[:, CYCLE_NUMBER_COLUMN] == (inicycle-1)), 0].tolist()
+            else:
+                index_min = df.loc[(df.loc[:, CYCLE_NUMBER_COLUMN] == 1), 0].tolist()
+                
+            if endcycle is not None:
+                index_max = df.loc[(df.loc[:, CYCLE_NUMBER_COLUMN] == endcycle), 0].tolist()
+            else:
+                index_max = df.loc[(df.loc[:, CYCLE_NUMBER_COLUMN] == df.loc[:, CYCLE_NUMBER_COLUMN].max()), 0].tolist()
+            
+            # Read saving file index
+            df2 = pd.read_csv(
+                os.path.join(rawdir, "savingFileIndex_start.csv"), 
+                sep="\\s+", 
+                skiprows=0, 
+                engine="c", 
+                header=None, 
+                encoding="cp949", 
+                on_bad_lines='skip'
+            )
+            index_list = df2.loc[:, 3].tolist()  # result index number
+            
+            # Clean up index values
+            clean_indices = [int(element.replace(',', '')) for element in index_list]
+            
+            # Find file positions
+            if len(index_min) != 0:
+                file_start = bisect.bisect_left(clean_indices, index_min[-1] + 1) - 1
+                file_end = bisect.bisect_left(clean_indices, index_max[-1] + 1) - 1
+                return file_start, file_end
+            else:
+                logger.warning(f"No matching cycles found for inicycle={inicycle}")
+                return -1, -1
+                
+        except Exception as e:
+            logger.error(f"Error processing cycle data in {rawdir}: {e}")
+            return -1, -1
+
+    def pne_continue_data(self, path: str, inicycle: Optional[int] = None, endcycle: Optional[int] = None) -> pd.DataFrame:
+        """
+        Extract and combine data from a PNE data directory.
+        
+        Args:
+            path: Path to the data directory
+            inicycle: Initial cycle number
+            endcycle: End cycle number
+            
+        Returns:
+            DataFrame containing the combined profile data
+        """
+        df = pd.DataFrame()
+        profile_raw = None
+        
+        # Check for Restore directory
+        restore_dir = os.path.join(path, "Restore")
+        if not os.path.isdir(restore_dir):
+            logger.warning(f"Restore directory not found at: {restore_dir}")
+            return df
+        
+        logger.info(f"Processing Restore directory at: {restore_dir}")
+        
+        try:
+            # Get files within the cycle range
+            file_start, file_end = self.pne_search_cycle(restore_dir, inicycle, endcycle)
+            subfile = [f for f in os.listdir(restore_dir) if f.endswith(".csv")]
+            
+            if file_start != -1:
+                for files in subfile[file_start:(file_end+1)]:
+                    if "SaveData" in files:
+                        logger.debug(f"Reading data file: {files}")
+                        profile_raw_temp = pd.read_csv(
+                            os.path.join(restore_dir, files), 
+                            sep=",", 
+                            skiprows=0, 
+                            engine="c", 
+                            header=None, 
+                            encoding="cp949", 
+                            on_bad_lines='skip'
+                        )
+                        
+                        if profile_raw is not None:
+                            profile_raw = pd.concat([profile_raw, profile_raw_temp], ignore_index=True)
+                        else:
+                            profile_raw = profile_raw_temp
+        
+        except Exception as e:
+            logger.error(f"Error processing data in {restore_dir}: {e}")
+            return df
+            
+        # Store the profile data in the DataFrame properly
+        if profile_raw is not None:
+            df = profile_raw
+            
+        return df
+
+    def pne_cyc_continue(self, path: str) -> pd.DataFrame:
+        """
+        Extract cycle data from SaveEndData file.
+        
+        Args:
+            path: Path to the data directory
+            
+        Returns:
+            DataFrame containing cycle data
+        """
+        df = pd.DataFrame()
+        restore_dir = os.path.join(path, "Restore")
+        
+        if not os.path.isdir(restore_dir):
+            logger.warning(f"Restore directory not found at: {restore_dir}")
+            return df
+            
+        logger.info(f"Processing cycle data from: {restore_dir}")
+        
+        try:
+            subfile = [f for f in os.listdir(restore_dir) if f.endswith(".csv")]
+            save_end_data_file = next((f for f in subfile if "SaveEndData" in f), None)
+            
+            if save_end_data_file:
+                df.Cycrawtemp = pd.read_csv(
+                    os.path.join(restore_dir, save_end_data_file), 
+                    sep=",", 
+                    skiprows=0, 
+                    engine="c", 
+                    header=None, 
+                    encoding="cp949", 
+                    on_bad_lines='skip'
+                )
+        except Exception as e:
+            logger.error(f"Error reading cycle data from {restore_dir}: {e}")
+            
+        return df
+
+    def get_cycle_range(self) -> None:
+        """Get cycle range from user input."""
+        self.inicycle = None
+        self.endcycle = None
+        
+        try:
+            user_input = input("Enter initial cycle number (or press Enter for all cycles): ").strip()
+            if user_input:
+                self.inicycle = int(user_input)
+            
+            user_input = input("Enter end cycle number (or press Enter for all cycles): ").strip()
+            if user_input:
+                self.endcycle = int(user_input)
+                
+            logger.info(f"Processing cycles: {'all' if self.inicycle is None else self.inicycle} to {'all' if self.endcycle is None else self.endcycle}")
+            
+        except ValueError:
+            logger.warning("Invalid cycle numbers provided. Using all cycles.")
+
+    def organize_data_by_cyclename(self, cyclename: List[str], cyclepath: List[str]) -> None:
+        """
+        Organize data paths by cycle name.
+        
+        Args:
+            cyclename: List of cycle names
+            cyclepath: List of cycle paths
+        """
+        # First, group all paths by cyclename
+        for i, path in enumerate(cyclepath):
+            cycname = cyclename[i]
+            if cycname not in self.organized_data:
+                self.organized_data[cycname] = {'paths': [], 'indices': []}
+            
+            self.organized_data[cycname]['paths'].append(path)
+            self.organized_data[cycname]['indices'].append(i)
+        
+        # For each cyclename, collect all subfolders
+        for cycname, data in self.organized_data.items():
+            all_subfolders = []
+            for path in data['paths']:
+                try:
+                    subfolders = [f.path for f in os.scandir(path) if f.is_dir() and "Pattern" not in f.path]
+                    all_subfolders.append(subfolders)
+                except Exception as e:
+                    logger.error(f"Error scanning directory {path}: {e}")
+                    all_subfolders.append([])
+            
+            # Store subfolders in the organized_data dictionary
+            data['all_subfolders'] = all_subfolders
+
+    def process_profiles(self) -> None:
+        """Process profiles from all organized data."""
+        # Process each cyclename group
+        for cycname, data in self.organized_data.items():
+            all_subfolders = data['all_subfolders']
+            
+            # Debug print
+            logger.info(f"\nProcessing cyclename: {cycname}")
+            for i, subfolders in enumerate(all_subfolders):
+                logger.info(f"Cycle[{i}] has {len(subfolders)} subfolders:")
+                for j, subfolder in enumerate(subfolders):
+                    channel, channel_id = self.extract_channel_number(subfolder)
+                    logger.debug(f"  all_subfolders[{i}][{j}]\t{subfolder}\tcycle[{i}]\t{cycname}\tchannel: {channel}, id: {channel_id}")
+            
+            # Process each cycle
+            for cycle_idx, subfolders in enumerate(all_subfolders):
+                # Process each subfolder for this cycle
+                for subfolder in subfolders:
+                    channel, channel_id = self.extract_channel_number(subfolder)
+                    if channel:
+                        # Create a unique key for each channel in each subfolder
+                        channel_key = f"{cycname}_Ch{channel_id}"
+                        
+                        # Extract data from the subfolder
+                        pne_profile = self.pne_continue_data(subfolder, self.inicycle, self.endcycle)
+                        
+                        if not pne_profile.empty:
+                            if channel_key not in self.output_data:
+                                self.output_data[channel_key] = []
+                            
+                            # Store the profile data with cycle information
+                            self.output_data[channel_key].append(ProfileData(
+                                cycle_idx=cycle_idx,
+                                profile=pne_profile,
+                                subfolder=subfolder
+                            ))
+                            logger.info(f"Added data for {channel_key}, cycle {cycle_idx}, subfolder: {os.path.basename(subfolder)}")
+
+    def calculate_accumulated_time(self, profiles_list: List[ProfileData], merged_profile: pd.DataFrame, time_col: int) -> pd.DataFrame:
+        """
+        Calculate accumulated time for merged profiles.
+        
+        Args:
+            profiles_list: List of profile data objects
+            merged_profile: DataFrame with merged profiles
+            time_col: Column index for the new time column
+            
+        Returns:
+            DataFrame with accumulated time
+        """
+        # Initialize the new time column
+        merged_profile[time_col] = 0
+        
+        # Track accumulated time
+        accumulated_days = 0
+        accumulated_time = 0
+        last_day = 0
+        last_time = 0
+        
+        # Process each profile separately to handle resets
+        start_idx = 0
+        for item in profiles_list:
+            profile = item.profile
+            end_idx = start_idx + len(profile)
+            
+            # If not the first profile, check for time reset
+            if start_idx > 0:
+                current_day = merged_profile.iloc[start_idx][TIME_DAY_COLUMN]
+                current_time = merged_profile.iloc[start_idx][TIME_HUNDREDTH_SEC_COLUMN]
+                
+                # If time resets (current time is less than previous time), accumulate the previous time
+                if current_day < last_day or (current_day == last_day and current_time < last_time):
+                    accumulated_days += last_day
+                    accumulated_time += last_time
+            
+            # Calculate time for this segment with accumulation
+            days = merged_profile.iloc[start_idx:end_idx][TIME_DAY_COLUMN]
+            times = merged_profile.iloc[start_idx:end_idx][TIME_HUNDREDTH_SEC_COLUMN]
+            
+            # Update the time column with accumulated values
+            merged_profile.iloc[start_idx:end_idx, time_col] = ((accumulated_days + days) * DAY_TO_HUNDREDTH_SEC + 
+                                                                (accumulated_time + times)) / 100
+            
+            # Update for next iteration
+            last_day = merged_profile.iloc[end_idx-1][TIME_DAY_COLUMN]
+            last_time = merged_profile.iloc[end_idx-1][TIME_HUNDREDTH_SEC_COLUMN]
+            start_idx = end_idx
+            
+        return merged_profile
+
+    def create_plot(self, channel_key: str, merged_profile: pd.DataFrame, time_col: int) -> None:
+        """
+        Create and save an interactive plot for the merged profile data.
+        
+        Args:
+            channel_key: Channel identifier
+            merged_profile: DataFrame with the merged profile data
+            time_col: Column index for the time data
+        """
+        try:
+            # First figure creation is redundant, removing it
+            fig, ax = plt.subplots(figsize=(12, 6))
+            line, = ax.plot(merged_profile[time_col], merged_profile[VOLTAGE_CURRENT_COLUMN], 'b-')
+            ax.set_title(f"{channel_key} - Time vs Data")
+            ax.set_xlabel("Time (seconds)")
+            ax.set_ylabel("Value (Column 9)")
+            ax.grid(True)
+            
+            # Add zoom and pan functionality
+            def on_select(eclick, erelease):
+                x1, y1 = eclick.xdata, eclick.ydata
+                x2, y2 = erelease.xdata, erelease.ydata
+                if x1 != x2 and y1 != y2:  # Only zoom if a region is selected
+                    ax.set_xlim(min(x1, x2), max(x1, x2))
+                    ax.set_ylim(min(y1, y2), max(y1, y2))
+                    fig.canvas.draw_idle()
+            
+            # Add reset button
+            plt.subplots_adjust(bottom=0.2)
+            reset_ax = plt.axes([0.8, 0.05, 0.1, 0.04])
+            reset_button = Button(reset_ax, 'Reset View')
+            
+            def reset_view(event):
+                ax.set_xlim(merged_profile[time_col].min(), merged_profile[time_col].max())
+                ax.set_ylim(merged_profile[VOLTAGE_CURRENT_COLUMN].min(), merged_profile[VOLTAGE_CURRENT_COLUMN].max())
+                fig.canvas.draw_idle()
+            
+            reset_button.on_clicked(reset_view)
+            
+            # Add rectangle selector for zoom
+            rect_selector = RectangleSelector(
+                ax, 
+                on_select, 
+                useblit=True,
+                button=[1], 
+                minspanx=5, 
+                minspany=5,
+                spancoords='pixels',
+                interactive=True
+            )
+            
+            plt.tight_layout()
+            
+            # Save the plot
+            plot_filename = f"{channel_key}_plot.png"
+            plt.savefig(plot_filename)
+            plt.close()
+            logger.info(f"Generated plot for {channel_key} and saved to {plot_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error creating plot for {channel_key}: {e}")
+
+    def merge_profiles(self) -> None:
+        """Merge profiles for each channel key."""
+        for channel_key, profiles_list in self.output_data.items():
+            # Sort by cycle_idx to ensure proper order
+            profiles_list.sort(key=lambda x: x.cycle_idx)
+            
+            if not profiles_list:
+                logger.warning(f"No profiles to merge for {channel_key}")
+                continue
+                
+            try:
+                # Merge all profiles for this channel
+                merged_profile = pd.concat([item.profile for item in profiles_list], ignore_index=True)
+                
+                # Add new column: Calculate total time in seconds with accumulation
+                time_col = merged_profile.shape[1]
+                merged_profile = self.calculate_accumulated_time(profiles_list, merged_profile, time_col)
+                
+                self.merged_data[channel_key] = merged_profile
+                
+                # Export merged profile to CSV
+                output_filename = f"{channel_key}_merged_profile.csv"
+                merged_profile.to_csv(output_filename, index=False)
+                logger.info(f"Exported merged profile data for {channel_key} to {output_filename}")
+                
+                # Create plot
+                self.create_plot(channel_key, merged_profile, time_col)
+                
+                # Print detailed information about what was merged
+                logger.info(f"Merged {len(profiles_list)} profiles for {channel_key}:")
+                for item in profiles_list:
+                    logger.info(f"  - Cycle {item.cycle_idx}: {os.path.basename(item.subfolder)}")
+                    
+            except Exception as e:
+                logger.error(f"Error merging profiles for {channel_key}: {e}")
+
+    def process_data(self) -> Dict[str, pd.DataFrame]:
+        """
+        Main method to process all data.
+        
+        Returns:
+            Dictionary of merged data frames
+        """
+        try:
+            # Step 1: Get file paths
+            cyclename, cyclepath, mincapacity = self.set_pne_paths()
+            
+            # Check if paths were successfully loaded
+            if not cyclepath:
+                raise ValueError("No cycle paths found")
+            
+            # Step 2: Get cycle range from user
+            self.get_cycle_range()
+            
+            # Step 3: Organize data by cyclename
+            self.organize_data_by_cyclename(cyclename, cyclepath)
+            
+            # Step 4: Process profiles
+            self.process_profiles()
+            
+            # Step 5: Merge profiles
+            self.merge_profiles()
+            
+            # Step 6: Check if any data was processed
+            if not self.merged_data:
+                logger.warning("No data was processed. Check your input paths and cycle numbers.")
+            else:
+                # Print a summary of the processed data
+                logger.info("\nData summary:")
+                for key, df in self.merged_data.items():
+                    logger.info(f"  - {key}: {df.shape[0]} rows, {df.shape[1]} columns")
+            
+            logger.info(f"\nProcessed {len(self.merged_data)} unique channels with data")
+            return self.merged_data
+            
+        except Exception as e:
+            logger.error(f"Error in data processing: {e}")
+            return {}
+
+
+def main():
+    """Main entry point for the PNE data processor."""
+    try:
+        processor = PNEDataProcessor()
+        processor.process_data()
+    except Exception as e:
+        logger.error(f"Error in main function: {e}")
+        print(f"An error occurred: {e}")
+
+
+if __name__ == "__main__":
+    main()
