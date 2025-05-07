@@ -96,19 +96,18 @@ def pne_search_cycle(rawdir, inicycle=None, endcycle=None):
         
     df = pd.read_csv(os.path.join(rawdir, save_end_data_file), sep=",", skiprows=0, engine="c", header = None, encoding="cp949", on_bad_lines='skip')
    
-    # Get index for initial cycle
-    index_min = df.loc[(df.loc[:,27]==(inicycle-1)),0].tolist()
-    
-    # Get index for end cycle
-    index_max = df.loc[(df.loc[:,27]==endcycle),0].tolist()
-        # Define inicycle and endcycle if they are None
-    
     if inicycle is None or endcycle is None:
         if inicycle is None:
             inicycle = df.loc[:,27].min()
         if endcycle is None:
             endcycle = df.loc[:,27].max()
     
+    # Get index for initial cycle
+    index_min = df.loc[(df.loc[:,27]==(inicycle-1)),0].tolist()
+    # Get index for end cycle
+    index_max = df.loc[(df.loc[:,27]==endcycle),0].tolist()
+    
+    # Define inicycle and endcycle if they are None
     df2 = pd.read_csv(os.path.join(rawdir, "savingFileIndex_start.csv"), sep="\\s+", skiprows=0, engine="c", header = None, encoding="cp949", on_bad_lines='skip')
     df2 = df2.loc[:,3].tolist() #result index number
     
@@ -125,6 +124,11 @@ def pne_search_cycle(rawdir, inicycle=None, endcycle=None):
         file_end = -1
 
     return file_start, file_end, inicycle, endcycle
+    # Output:
+    # file_start: Index of the starting file in the cycle range
+    # file_end: Index of the ending file in the cycle range
+    # inicycle: Updated initial cycle number if it was None
+    # endcycle: Updated end cycle number if it was None
 
             
 
@@ -217,12 +221,6 @@ def concatenate():
             endcycle = int(user_input)
     except ValueError:
         print("Invalid cycle numbers provided. Using all cycles.")
-
-    # Set default values for inicycle and endcycle
-    inicycle = 1 if inicycle is None else inicycle
-    endcycle = df.loc[:,27].max() if endcycle is None else endcycle
-        
-    print(f"Processing cycles: {'all' if inicycle is None else inicycle} to {'all' if endcycle is None else endcycle}")
     
     # Organize paths by cyclename
     organized_data = {}
@@ -238,12 +236,12 @@ def concatenate():
     
     # For each cyclename, collect all subfolders
     for cycname, data in organized_data.items():
-        all_subfolders = []
+        all_subfolders = []  # Initialize all_subfolders for each cycname
         for path in data['paths']:
             subfolders = [f.path for f in os.scandir(path) if f.is_dir() and "Pattern" not in f.path]
             all_subfolders.append(subfolders)
         
-        # Store subfolders in the organized_data dictionary
+        # Store subfolders directly in the data dictionary
         data['all_subfolders'] = all_subfolders
     
     # Dictionary to store all channel-specific dataframes
