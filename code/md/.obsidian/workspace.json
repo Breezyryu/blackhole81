@@ -1,24 +1,20 @@
 {
   "main": {
-    "id": "37217f6b08dd8c03",
+    "id": "b8ba6b8aca8ffe91",
     "type": "split",
     "children": [
       {
-        "id": "876147a10c84b43d",
+        "id": "b5c27b8d9b346311",
         "type": "tabs",
         "children": [
           {
-            "id": "9b36fda2ff9f1952",
+            "id": "8a12b43c35fe6daf",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "00. Inbox/PINN paper - Prof.Oh .md",
-                "mode": "preview",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "PINN paper - Prof.Oh"
+              "title": "New tab"
             }
           }
         ]
@@ -27,15 +23,15 @@
     "direction": "vertical"
   },
   "left": {
-    "id": "d92f9b20b75c8b56",
+    "id": "6d376a5cfea3287c",
     "type": "split",
     "children": [
       {
-        "id": "fa4fa2abdcb704c3",
+        "id": "af0dba14f36e84d6",
         "type": "tabs",
         "children": [
           {
-            "id": "0503f29dcf723cc6",
+            "id": "99242c05e5157970",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
@@ -48,7 +44,7 @@
             }
           },
           {
-            "id": "6e50dfb45405cfea",
+            "id": "9bd4b86d5b25220d",
             "type": "leaf",
             "state": {
               "type": "search",
@@ -65,7 +61,7 @@
             }
           },
           {
-            "id": "0ebe9ee9ab02e22e",
+            "id": "b50a17d2990bc73d",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
@@ -81,20 +77,19 @@
     "width": 300
   },
   "right": {
-    "id": "6fce1df14bf494b5",
+    "id": "e30654964de37bef",
     "type": "split",
     "children": [
       {
-        "id": "d0fa70a4ee52c94c",
+        "id": "75ed13d99f8a160d",
         "type": "tabs",
         "children": [
           {
-            "id": "a87fffebc51282e9",
+            "id": "1f3ec996a47f011f",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "00. Inbox/EPF - Electrode Porosity Forming.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,25 +99,24 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for EPF - Electrode Porosity Forming"
+              "title": "Backlinks"
             }
           },
           {
-            "id": "b44d7c0d0b5d46f1",
+            "id": "b50405c7404c61a2",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "00. Inbox/EPF - Electrode Porosity Forming.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from EPF - Electrode Porosity Forming"
+              "title": "Outgoing links"
             }
           },
           {
-            "id": "0ce1f6a1bb973cd5",
+            "id": "bc87433c4a5dfbde",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -137,18 +131,17 @@
             }
           },
           {
-            "id": "a25f3b00dbff92f6",
+            "id": "3b5ecef64cb4d5cb",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "00. Inbox/EPF - Electrode Porosity Forming.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of EPF - Electrode Porosity Forming"
+              "title": "Outline"
             }
           }
         ]
@@ -168,12 +161,6 @@
       "command-palette:Open command palette": false
     }
   },
-  "active": "9b36fda2ff9f1952",
-  "lastOpenFiles": [
-    "1-s2.0-S0378775324017191-mainext.pdf",
-    "1-s2.0-S0360544224006005-main.pdf",
-    "1-s2.0-S0013468625004724-main.pdf",
-    "00. Inbox/EPF - Electrode Porosity Forming.md",
-    "00. Inbox/COSMX 개발 방향.md"
-  ]
+  "active": "8a12b43c35fe6daf",
+  "lastOpenFiles": []
 }

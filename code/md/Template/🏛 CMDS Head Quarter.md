@@ -13,36 +13,55 @@ tags:
 Links:: [[🏛 CMDS Head Quarter]] | [[🏛 CMDS Guide]]
 References:: [[99.Template]]
 ## CMDS
+
 I. 지식 기반 및 입력 (Foundations & Inputs)
 
     1.1 개념 및 이론 (Concepts & Theories):
 
         [[📖 100 Themes]]
+
         [[📚 101 Interests]]
+
         [[📚 102 Topics]]
+
         [[📚 103 Variables]]
+
         [[📚 104 Terminologies]]
+
         [[📚 201 Concepts]]
+
         [[📚 202 Frameworks]]
+
         [[📚 203 Models]]
+
         [[📚 204 Theories]]
+
         [[📚 205 Classics]]
 
     1.2 문헌 및 자료 (Literature & Resources):
 
         [[📖 200 Literature]]
+
         [[📚 210 Literature Reviews]]
+
         [[📚 240 Books]]
+
         [[📚 290 Bible]]
+
         [[📚 291 Sermon]]
+
         [[📚 220 Personal Insights]]
 
     1.3 데이터 및 정보 (Data & Information):
 
         [[📖 300 Data]]
+
         [[📚 301 Scale Development and Validation]]
+
         [[📚 302 Questionnaires]]
+
         [[📚 303 Panel Data]]
+
         [[📚 310 Data Management]]
 
         [[📚 311 Database Systems]]
@@ -129,7 +148,15 @@ III. 응용 및 전문 분야 (Applications & Specialties)
 
         [[📚 630 Development]]
 
-    3.3 건강 및 웰빙 (Health & Well-being):
+    3.3 금융 및 비즈니스 분석 (Finance & Business Analysis): 
+
+        [[📚 640 주식 분석 (Stock Analysis)]]
+
+        [[📚 641 기업 분석 (Corporate Analysis)]]
+
+        [[📚 642 산업 분석 (Industry Analysis)]]
+
+    3.4 건강 및 웰빙 (Health & Well-being):
 
         [[📚 651 Physical Health ]]
 
@@ -137,7 +164,7 @@ III. 응용 및 전문 분야 (Applications & Specialties)
 
         [[📚 653 Biohacking]]
 
-    3.4 교육 및 영성 (Education & Spirituality):
+    3.5 교육 및 영성 (Education & Spirituality):
 
         [[📚 680 Educations]]
 

@@ -101,7 +101,14 @@ def pne_search_cycle(rawdir, inicycle=None, endcycle=None):
     
     # Get index for end cycle
     index_max = df.loc[(df.loc[:,27]==endcycle),0].tolist()
-        
+        # Define inicycle and endcycle if they are None
+    
+    if inicycle is None or endcycle is None:
+        if inicycle is None:
+            inicycle = df.loc[:,27].min()
+        if endcycle is None:
+            endcycle = df.loc[:,27].max()
+    
     df2 = pd.read_csv(os.path.join(rawdir, "savingFileIndex_start.csv"), sep="\\s+", skiprows=0, engine="c", header = None, encoding="cp949", on_bad_lines='skip')
     df2 = df2.loc[:,3].tolist() #result index number
     
@@ -117,7 +124,7 @@ def pne_search_cycle(rawdir, inicycle=None, endcycle=None):
         file_start = -1
         file_end = -1
 
-    return file_start, file_end
+    return file_start, file_end, inicycle, endcycle
 
             
 
@@ -149,7 +156,13 @@ def pne_continue_data(path, inicycle=None, endcycle=None):
     if profile_raw is not None:
         df = profile_raw
         
-    return df        
+    # Update inicycle and endcycle if they are None
+    if inicycle is None:
+        inicycle = df.loc[:,27].min()
+    if endcycle is None:
+        endcycle = df.loc[:,27].max()
+    
+    return df, inicycle, endcycle
 
 def pne_cyc_continue_data(path):
     df = pd.DataFrame()
@@ -281,7 +294,7 @@ def concatenate():
                     #46 Voltage min(uV)
                     #46 Voltage min(uV)
                     '''
-                    pneProfile = pne_continue_data(subfolder, inicycle, endcycle)
+                    pneProfile, inicycle, endcycle = pne_continue_data(subfolder, inicycle, endcycle)
                     pneCycle = pne_cyc_continue_data(subfolder, inicycle, endcycle)
 
                     # Extract and process cycle data
