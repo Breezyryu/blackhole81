@@ -248,7 +248,10 @@ def concatenate():
                 
                 if channel:
                     # Create a unique key for each channel
-                    channel_key = f"{cycname.split('_')[0]}_Ch{channel_id}"  # Use base name (A1) for the channel key
+                    # Extract the base part of cyclename (A1_MP1_T45)
+                    # and combine with channel_id to create a consistent key
+                    base_cycname = '_'.join(cycname.split('_')[:-1])  # Remove the last part (sequence number)
+                    channel_key = f"{base_cycname}_Ch{channel_id}"
                     
                     # Extract data
                     pneProfile = pne_continue_data(subfolder, inicycle, endcycle)
@@ -287,23 +290,26 @@ def concatenate():
     # Process each channel's data
     for channel_key, data_list in channel_data.items():
         if data_list:
-            # Concatenate all data for this channel
-            channel_df = pd.concat(data_list, ignore_index=True)
+            # Create a DataFrame with all cyclenames and their corresponding data
+            channel_df_with_metadata = pd.DataFrame({
+                'cyclename': [df['cyclename'].iloc[0] for df in data_list],
+                'data': data_list
+            })
             
-            # Calculate cumulative time within each cyclename
-            result_dfs = []
+            # Extract sequence numbers and sort
+            channel_df_with_metadata['seq_num'] = channel_df_with_metadata['cyclename'].apply(
+                lambda x: int(x.split('_')[-1]) if x.split('_')[-1].isdigit() else 0
+            )
             
-            for cyclename, cycle_group in channel_df.groupby('cyclename'):
-                # Sort by cycle_idx within each cyclename group
-                cycle_group = cycle_group.sort_values('cycle_idx')
-                
-                # Calculate cumulative time for this cyclename group
-                cycle_group['cumulative_time'] = cycle_group['time'].cumsum()
-                
-                result_dfs.append(cycle_group)
+            # Sort by sequence number to ensure correct order (1, 2, 3, etc.)
+            channel_df_with_metadata = channel_df_with_metadata.sort_values('seq_num')
             
-            # Concatenate all cyclename groups for this channel
-            channel_merged = pd.concat(result_dfs, ignore_index=True)
+            # Concatenate the DataFrames in sorted order
+            sorted_data_list = channel_df_with_metadata['data'].tolist()
+            channel_merged = pd.concat(sorted_data_list, ignore_index=True)
+            
+            # Calculate cumulative time for the entire sequence
+            channel_merged['cumulative_time'] = channel_merged['time'].cumsum()
             
             # Store merged data
             merged_data[channel_key] = channel_merged
