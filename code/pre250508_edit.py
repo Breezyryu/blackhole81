@@ -339,13 +339,8 @@ def main():
     """
     try:
         # 1. 경로 파일 로드
-        filepath = "filepath.txt"
-        if not os.path.exists(filepath):
-            logger.error(f"파일을 찾을 수 없습니다: {filepath}")
-            return
-        
         # 2. cyclename, cyclepath, capacity 추출
-        cyclename, cyclepath, capacity = set_pne_paths(filepath)
+        cyclename, cyclepath, capacity = set_pne_paths()
         
         # 경로가 성공적으로 로드되었는지 확인
         if not cyclepath:
