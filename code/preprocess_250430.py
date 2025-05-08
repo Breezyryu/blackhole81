@@ -183,16 +183,17 @@ def extract_channel_number(path):
         path (str): Path containing channel information
         
     Returns:
-        str: Extracted channel number or None if not found
+        tuple: (channel_number, channel_id, module_id)
     """
     # Look for patterns like "M01Ch045[045]" or "M01Ch046[046]"
-    match = re.search(r'M\d+Ch(\d+)(?:\[(\d+)\])?', path)
+    match = re.search(r'M(\d+)Ch(\d+)(?:\[(\d+)\])?', path)
     if match:
-        # Return both the channel number and the number in brackets if available
-        channel = match.group(1)
-        channel_id = match.group(2) if match.group(2) else channel
-        return channel, channel_id
-    return None, None
+        # Return module_id, channel_number, and channel_id
+        module_id = match.group(1)
+        channel = match.group(2)
+        channel_id = match.group(3) if match.group(3) else channel
+        return channel, channel_id, module_id
+    return None, None, None
 
 
 def extract_base_name(cycname):
@@ -228,31 +229,6 @@ def extract_sequence_number(cyclename):
     if parts[-1].isdigit():
         return int(parts[-1])
     return 0
-
-
-def get_channel_position(subfolder, sequence_num):
-    """
-    Determines the position of a channel within its sequence group.
-    
-    Args:
-        subfolder (str): Path to the subfolder containing channel information
-        sequence_num (int): Sequence number of the current data
-        
-    Returns:
-        int: Position index of the channel in its sequence
-    """
-    # Extract channel information
-    channel, channel_id = extract_channel_number(subfolder)
-    if not channel:
-        return -1
-    
-    # Convert channel to integer if possible
-    try:
-        channel_int = int(channel)
-        return channel_int % 10  # Use last digit as position
-    except ValueError:
-        # If channel cannot be converted to int, use string hash
-        return hash(channel) % 10
 
 
 def sanitize_filename(filename):
@@ -317,102 +293,131 @@ def concatenate():
         os.makedirs(output_dir)
         print(f"Created output directory: {output_dir}")
     
-    # Group the data by base_name
-    base_name_groups = cycle_df.groupby('base_name')
+    # Dictionary to collect all channel data
+    all_channels = []
+    
+    # Process each cyclename path
+    for _, row in cycle_df.iterrows():
+        cyclename = row['cyclename']
+        path = row['cyclepath'].replace('\\', '/')
+        base_name = row['base_name']
+        seq_num = row['seq_num']
+        
+        print(f"\nProcessing cyclename: {cyclename}")
+        
+        # Get all channel directories in this path
+        try:
+            channel_dirs = [d.path for d in os.scandir(path) if d.is_dir() and "Pattern" not in d.path]
+            
+            print(f"Found {len(channel_dirs)} channels in {path}")
+            
+            # Process each channel directory
+            for dir_idx, channel_dir in enumerate(sorted(channel_dirs)):
+                channel, channel_id, module_id = extract_channel_number(channel_dir)
+                
+                if channel and module_id:
+                    print(f"  {dir_idx+1}. {channel_dir} - Module: M{module_id}, Channel: Ch{channel}")
+                    
+                    all_channels.append({
+                        'path': channel_dir,
+                        'cyclename': cyclename,
+                        'base_name': base_name,
+                        'seq_num': seq_num,
+                        'module_id': module_id,
+                        'channel': channel,
+                        'channel_id': channel_id,
+                        'dir_idx': dir_idx
+                    })
+        except FileNotFoundError:
+            print(f"Warning: Path {path} not found")
+    
+    # Create a DataFrame for easier manipulation
+    channels_df = pd.DataFrame(all_channels)
+    
+    if channels_df.empty:
+        print("No valid channels found. Exiting.")
+        return {}
     
     # Dictionary to store merged data
     merged_data = {}
     
-    # Process each base_name group
-    for base_name, group in base_name_groups:
+    # Group by base_name first
+    for base_name, base_group in channels_df.groupby('base_name'):
         print(f"\nProcessing base name: {base_name}")
         
-        # Skip if only one sequence (need at least 2 for merging)
-        if len(group['seq_num'].unique()) < 2:
+        # Skip if only one sequence
+        if base_group['seq_num'].nunique() < 2:
             print(f"  Skipping {base_name} - only one sequence found")
             continue
         
-        # Collect all channels from each sequence, maintaining order
-        sequence_channels = {}
+        # Get unique modules across all sequences
+        all_modules = sorted(base_group['module_id'].unique())
+        print(f"  Found modules: {', '.join(['M'+m for m in all_modules])}")
         
-        for _, row in group.iterrows():
-            path = row['cyclepath'].replace('\\', '/')
-            seq_num = row['seq_num']
+        # For each module, sort channels and assign position
+        module_channels = {}
+        
+        for module_id in all_modules:
+            # Get channels for this module
+            module_group = base_group[base_group['module_id'] == module_id]
             
-            # Get all channel directories in this path
-            try:
-                channel_dirs = [d.path for d in os.scandir(path) if d.is_dir() and "Pattern" not in d.path]
+            # For each sequence in this module
+            for seq_num, seq_group in module_group.groupby('seq_num'):
+                # Sort channels by their numeric value
+                sorted_channels = seq_group.sort_values('channel')
                 
-                # Sort the channel directories to ensure consistent order
-                channel_dirs.sort()
-                
-                channel_info_list = []
-                for idx, channel_dir in enumerate(channel_dirs):
-                    channel, channel_id = extract_channel_number(channel_dir)
-                    if channel:
-                        channel_info_list.append({
-                            'path': channel_dir,
-                            'channel': channel,
-                            'channel_id': channel_id,
-                            'position': idx,  # Position in the sorted list
-                            'seq_num': seq_num,
-                            'cyclename': row['cyclename']
-                        })
-                
-                # Store all channels for this sequence
-                sequence_channels[seq_num] = channel_info_list
-                print(f"  Sequence {seq_num}: Found {len(channel_info_list)} channels")
-            
-            except FileNotFoundError:
-                print(f"  Warning: Path {path} not found")
+                # Assign position within module+sequence
+                for pos, (_, channel) in enumerate(sorted_channels.iterrows()):
+                    key = (module_id, pos)
+                    if key not in module_channels:
+                        module_channels[key] = []
+                    module_channels[key].append(channel)
         
-        # Make sure we have channels for at least two sequences
-        if len(sequence_channels) < 2:
-            print(f"  Skipping {base_name} - not enough valid sequences found")
-            continue
+        # Create pairs by position across modules
+        print(f"  Creating pairs by position across modules...")
         
-        # Determine the maximum number of channels in any sequence
-        max_channels = max(len(channels) for channels in sequence_channels.values())
+        module_pairs = []
+        # Collect channel positions across all modules
+        all_positions = set(pos for _, pos in module_channels.keys())
         
-        # For each position (0, 1, 2, ...), merge channels across sequences
-        for pos in range(max_channels):
-            # Collect channels at this position from each sequence
+        # For each position, collect one channel from each module
+        for pos in sorted(all_positions):
             position_channels = []
             
-            for seq_num in sorted(sequence_channels.keys()):
-                channels = sequence_channels[seq_num]
-                
-                if pos < len(channels):
-                    position_channels.append(channels[pos])
+            for module_id in all_modules:
+                key = (module_id, pos)
+                if key in module_channels and module_channels[key]:
+                    # Add one channel from this module at this position
+                    position_channels.extend(module_channels[key])
             
-            # Skip if only one channel found at this position
-            if len(position_channels) < 2:
-                continue
-            
-            # Create a name for this merged group using channel IDs
-            channel_ids = [ch['channel_id'] for ch in position_channels]
+            if len(position_channels) >= 2:  # Need at least 2 to merge
+                module_pairs.append(position_channels)
+        
+        # Process each pair
+        for pair_idx, channel_group in enumerate(module_pairs):
+            # Create a name for this merged group
+            channel_ids = [ch['channel_id'] for ch in channel_group]
             merged_key = f"Ch{'_Ch'.join(channel_ids)}"
             safe_key = sanitize_filename(merged_key)
             
-            print(f"\n  Processing position {pos+1}: {merged_key}")
-            for i, ch in enumerate(position_channels):
-                print(f"    {i+1}. {ch['path']} (seq: {ch['seq_num']}, channel: {ch['channel_id']})")
+            print(f"\n  Processing pair {pair_idx+1}: {merged_key}")
+            for i, ch in enumerate(channel_group):
+                print(f"    {i+1}. {ch['path']} (seq: {ch['seq_num']}, module: M{ch['module_id']}, channel: {ch['channel_id']})")
             
             # Process and merge data for these channels
             all_data = []
             
-            for idx, ch in enumerate(position_channels):
+            for idx, ch in enumerate(channel_group):
                 subfolder = ch['path']
                 cyclename = ch['cyclename']
                 channel_id = ch['channel_id']
                 
                 print(f"    Processing: {subfolder}")
                 
-                # Extract data using existing functions
+                # Extract data
                 pneProfile = pne_continue_data(subfolder, inicycle, endcycle)
                 pneCycle = pne_cyc_continue_data(subfolder)
                 
-                # Process cycle data
                 if not pneCycle.empty:
                     # Filter cycle data
                     cycle_data = pneCycle[
@@ -421,7 +426,6 @@ def concatenate():
                         (pneCycle[27] <= endcycle if endcycle is not None else True)
                     ]
                     
-                    # Select and rename columns
                     if not cycle_data.empty:
                         processed_data = cycle_data[[0, 8, 9, 10, 11]].copy()
                         processed_data.columns = ['time', 'voltage', 'current', 'chg_capacity', 'dchg_capacity']
@@ -435,54 +439,49 @@ def concatenate():
                         all_data.append(processed_data)
                         print(f"      Added {processed_data.shape[0]} rows of data for channel {channel_id}")
             
-            # Merge all data for this position group
+            # Merge data if we have any
             if all_data:
-                # Concatenate all DataFrames
+                # Concatenate data
                 group_merged = pd.concat(all_data, ignore_index=True)
                 
-                # Calculate cumulative time for the entire sequence
-                # First, calculate time difference within each path
+                # Calculate cumulative time
                 group_merged['path_time'] = group_merged.groupby('path_seq')['time'].transform(
                     lambda x: x - x.iloc[0] if len(x) > 0 else 0
                 )
                 
-                # Then calculate the cumulative time across all paths
+                # Calculate overall time
                 group_merged['cumulative_time'] = 0
                 prev_end_time = 0
                 
                 for seq in sorted(group_merged['path_seq'].unique()):
-                    # Adjust time for this sequence based on previous end time
                     mask = group_merged['path_seq'] == seq
                     if seq > 0:
-                        # Add the previous end time to all rows in this sequence
                         group_merged.loc[mask, 'cumulative_time'] = group_merged.loc[mask, 'path_time'] + prev_end_time
                     else:
-                        # For the first sequence, cumulative_time = path_time
                         group_merged.loc[mask, 'cumulative_time'] = group_merged.loc[mask, 'path_time']
                     
-                    # Update prev_end_time for the next sequence
                     if mask.any():
                         prev_end_time = group_merged.loc[mask, 'cumulative_time'].max()
                 
                 # Store merged data
                 merged_data[safe_key] = group_merged
                 
-                # Export to CSV in the output directory
+                # Export to CSV
                 output_filename = os.path.join(output_dir, f"{safe_key}_merged_cycles.csv")
                 try:
                     group_merged.to_csv(output_filename, index=False)
                     print(f"    Exported merged data to {output_filename}")
                 except Exception as e:
                     print(f"    Error saving file {output_filename}: {str(e)}")
-                    # Try with a simplified filename as a fallback
-                    fallback_filename = os.path.join(output_dir, f"{base_name}_pos{pos+1}_merged.csv")
+                    # Try fallback filename
+                    fallback_filename = os.path.join(output_dir, f"{base_name}_pair{pair_idx+1}_merged.csv")
                     try:
                         group_merged.to_csv(fallback_filename, index=False)
                         print(f"    Exported using fallback filename: {fallback_filename}")
                     except Exception as e2:
                         print(f"    Error saving fallback file: {str(e2)}")
     
-    # Print a summary
+    # Print summary
     if merged_data:
         print("\nData summary:")
         for key, df in merged_data.items():
@@ -496,7 +495,7 @@ def concatenate():
     else:
         print("Warning: No data was processed. Check your input paths and cycle numbers.")
     
-    print(f"\nProcessed {len(merged_data)} unique channel groups with data")
+    print(f"\nProcessed {len(merged_data)} unique merged channel groups")
     print(f"Output files saved to the '{output_dir}' directory")
     return merged_data
 
