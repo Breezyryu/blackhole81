@@ -409,16 +409,15 @@ def concatenate():
         if not channel_group:
             continue
             
-        # Generate a group key
+        # Generate a group key - use channel IDs for naming
         if len(channel_group) == 1:
             # Single channel group
             channel_info = channel_group[0]
             group_key = f"{channel_info['base_name']}_Ch{channel_info['channel_id']}"
         else:
-            # Multiple channel group
-            base_names = '_'.join(sorted(set(ch['base_name'] for ch in channel_group)))
-            channels = '_'.join(sorted(set(ch['channel_id'] for ch in channel_group)))
-            group_key = f"{base_names}_Ch{channels}"
+            # New naming for merged channels: Ch006_Ch073 format
+            channels_sorted = sorted([ch['channel_id'] for ch in channel_group])
+            group_key = f"Ch{'_Ch'.join(channels_sorted)}"
         
         # Sanitize the group key for use as a filename
         safe_group_key = sanitize_filename(group_key)
