@@ -255,6 +255,30 @@ def get_channel_position(subfolder, sequence_num):
         return hash(channel) % 10
 
 
+def sanitize_filename(filename):
+    """
+    Sanitize a filename by replacing or removing invalid characters.
+    
+    Args:
+        filename (str): The filename to sanitize
+        
+    Returns:
+        str: Sanitized filename
+    """
+    # Replace invalid characters with underscores
+    invalid_chars = r'[<>:"/\\|?*]'
+    sanitized = re.sub(invalid_chars, '_', filename)
+    
+    # Remove any leading/trailing periods or spaces
+    sanitized = sanitized.strip('. ')
+    
+    # Ensure the filename is not empty
+    if not sanitized:
+        sanitized = "unnamed"
+        
+    return sanitized
+
+
 def concatenate():
     cyclename, cyclepath, mincapacity = set_pne_paths()
     
@@ -388,6 +412,12 @@ def concatenate():
             channel_groups.append([channel_info.to_dict()])
             processed_paths.add(channel_info['path'])
     
+    # Create output directory if it doesn't exist
+    output_dir = "merged_data"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+    
     # Process each channel group
     merged_data = {}
     
@@ -405,6 +435,9 @@ def concatenate():
             base_names = '_'.join(sorted(set(ch['base_name'] for ch in channel_group)))
             channels = '_'.join(sorted(set(ch['channel_id'] for ch in channel_group)))
             group_key = f"{base_names}_Ch{channels}"
+        
+        # Sanitize the group key for use as a filename
+        safe_group_key = sanitize_filename(group_key)
         
         print(f"\nProcessing channel group {group_idx+1}: {group_key} with {len(channel_group)} paths")
         
@@ -477,12 +510,22 @@ def concatenate():
                     prev_end_time = group_merged.loc[mask, 'cumulative_time'].max()
             
             # Store merged data
-            merged_data[group_key] = group_merged
+            merged_data[safe_group_key] = group_merged
             
-            # Export to CSV
-            output_filename = f"{group_key}_merged_cycles.csv"
-            group_merged.to_csv(output_filename, index=False)
-            print(f"Exported merged cycle data for {group_key} to {output_filename}")
+            # Export to CSV in the output directory
+            output_filename = os.path.join(output_dir, f"{safe_group_key}_merged_cycles.csv")
+            try:
+                group_merged.to_csv(output_filename, index=False)
+                print(f"Exported merged cycle data for {group_key} to {output_filename}")
+            except Exception as e:
+                print(f"Error saving file {output_filename}: {str(e)}")
+                # Try with a simplified filename as a fallback
+                fallback_filename = os.path.join(output_dir, f"group_{group_idx}_merged_cycles.csv")
+                try:
+                    group_merged.to_csv(fallback_filename, index=False)
+                    print(f"Exported using fallback filename: {fallback_filename}")
+                except Exception as e2:
+                    print(f"Error saving fallback file: {str(e2)}")
             
             # Display channel IDs used in this group
             channel_ids = sorted(group_merged['channel_id'].unique())
@@ -503,6 +546,7 @@ def concatenate():
         print("Warning: No data was processed. Check your input paths and cycle numbers.")
     
     print(f"\nProcessed {len(merged_data)} unique channel groups with data")
+    print(f"Output files saved to the '{output_dir}' directory")
     return merged_data
 
 
