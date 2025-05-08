@@ -6,12 +6,14 @@ import re
 import bisect
 import logging
 from collections import defaultdict
+import tkinter as tk
+from tkinter import filedialog
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def set_pne_paths(filepath):
+def set_pne_paths():
     """
     파일에서 PNE 데이터 처리를 위한 경로 설정
     
@@ -21,9 +23,24 @@ def set_pne_paths(filepath):
     Returns:
         tuple: (cyclename, cyclepath, capacity) 리스트를 포함하는 튜플
     """
+    # Initialize tkinter
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    
+    # Ask user to select the TXT file
+    try:
+        # Try to use D:/Work_pc_D/datapath directory first
+        datafilepath = filedialog.askopenfilename(initialdir=r"D:/Work_pc_D/datapath", title="Choose Test files", filetypes=[("Text files", "*.txt")])
+    except:
+        # Fall back to home directory if the specified directory is not accessible
+        datafilepath = filedialog.askopenfilename(initialdir=os.path.expanduser("~"), title="Choose Test files", filetypes=[("Text files", "*.txt")])
+    
+    if not datafilepath:
+        raise ValueError("No file selected")
+    
     try:
         # 탭 구분자로 파일 읽기
-        df = pd.read_csv(filepath, sep="\t", engine="c", encoding="UTF-8", 
+        df = pd.read_csv(datafilepath, sep="\t", engine="c", encoding="UTF-8", 
                         skiprows=0, on_bad_lines='skip')
         
         # cyclename과 cyclepath 추출
@@ -31,7 +48,7 @@ def set_pne_paths(filepath):
         cyclepath = df['cyclepath'].tolist() if 'cyclepath' in df.columns else []
         
         if not cyclename or not cyclepath:
-            logger.warning(f"파일 {filepath}에서 cyclename 또는 cyclepath를 찾을 수 없습니다.")
+            logger.warning(f"파일 {datafilepath}에서 cyclename 또는 cyclepath를 찾을 수 없습니다.")
             return [], [], []
             
         # 각 cyclepath에서 용량 추출하여 capacity 리스트 생성
@@ -90,7 +107,7 @@ def pne_search_cycle(rawdir, inicycle=None, endcycle=None):
                 endcycle = int(df.loc[:,27].max())
         
         # 시작 사이클의 인덱스
-        index_min = df.loc[(df.loc[:,27]==(inicycle-1)),0].tolist()
+        index_min = df.loc[(df.loc[:,27]==(inicycle)),0].tolist()
         # 종료 사이클의 인덱스
         index_max = df.loc[(df.loc[:,27]==endcycle),0].tolist()
         
