@@ -287,14 +287,14 @@ def concatenate():
     cycle_df['base_name'] = cycle_df['cyclename'].apply(extract_base_name)
     cycle_df['seq_num'] = cycle_df['cyclename'].apply(extract_sequence_number)
     
-    # Dictionary to collect all channel information first
-    all_channels = {}
+    # First pass: collect all channel information
+    all_channels = []
     
-    # First pass: identify all channels and assign positions
     for _, row in cycle_df.iterrows():
         path = row['cyclepath']
         base_name = row['base_name']
         seq_num = row['seq_num']
+        cyclename = row['cyclename']
         
         # Replace backslashes with forward slashes for consistency
         path = path.replace('\\', '/')
@@ -308,19 +308,14 @@ def concatenate():
                 channel, channel_id = extract_channel_number(subfolder)
                 
                 if channel:
-                    # Determine channel position in its sequence
-                    position = get_channel_position(subfolder, seq_num)
+                    # Get position based on channel number
+                    position = int(channel) % 100  # Last two digits for position
                     
-                    # Store channel information
-                    if base_name not in all_channels:
-                        all_channels[base_name] = {}
-                    
-                    if position not in all_channels[base_name]:
-                        all_channels[base_name][position] = []
-                    
-                    all_channels[base_name][position].append({
+                    # Add to list of all channels
+                    all_channels.append({
                         'path': subfolder,
-                        'cyclename': row['cyclename'],
+                        'cyclename': cyclename,
+                        'base_name': base_name,
                         'seq_num': seq_num,
                         'channel': channel,
                         'channel_id': channel_id,
@@ -329,36 +324,105 @@ def concatenate():
         except FileNotFoundError:
             print(f"Warning: Path {path} not found, skipping")
     
-    # Create a dictionary to store channel paths by position
-    position_groups = {}
+    # Create a DataFrame from all channel information
+    channels_df = pd.DataFrame(all_channels)
     
-    # Group channels by their base_name and position
-    for base_name, positions in all_channels.items():
-        for position, channels in positions.items():
-            # Sort channels by sequence number
-            channels.sort(key=lambda x: x['seq_num'])
+    # Group channels by base_name
+    base_name_groups = channels_df.groupby('base_name')
+    
+    # Create channel groups based on same channel ID or position within each sequence
+    channel_groups = []
+    processed_paths = set()
+    
+    for base_name, group in base_name_groups:
+        # Sort by sequence number and then by channel position
+        group = group.sort_values(['seq_num', 'position'])
+        
+        # Create groups based on channel position
+        unique_positions = group['position'].unique()
+        
+        for i, pos in enumerate(unique_positions):
+            # Get all channels with this position
+            pos_channels = group[group['position'] == pos]
             
-            # Create a key for this position group
-            group_key = f"{base_name}_Pos{position}"
-            position_groups[group_key] = channels
+            # If there are multiple sequences, create a group for each sequence position
+            if pos_channels['seq_num'].nunique() > 1:
+                # Get unique sequence numbers
+                seq_nums = sorted(pos_channels['seq_num'].unique())
+                
+                # For each sequence position, group channels based on index in the sequence
+                for seq_idx in range(len(seq_nums)):
+                    # Create a new group
+                    seq_group = []
+                    
+                    # For each sequence number, get the channel at the specified position index
+                    for seq_num in seq_nums:
+                        seq_channels = pos_channels[pos_channels['seq_num'] == seq_num]
+                        
+                        # If we have channels for this sequence, add the appropriate one
+                        if not seq_channels.empty:
+                            # Sort channels by position
+                            seq_channels = seq_channels.sort_values('position')
+                            
+                            # If we have enough channels, add the one at the specified index
+                            # Otherwise add the first available channel
+                            if seq_idx < len(seq_channels):
+                                channel_info = seq_channels.iloc[seq_idx].to_dict()
+                                seq_group.append(channel_info)
+                                processed_paths.add(channel_info['path'])
+                    
+                    # Add group if not empty
+                    if seq_group:
+                        channel_groups.append(seq_group)
+            else:
+                # If only one sequence, add each channel as a separate group
+                for _, channel_info in pos_channels.iterrows():
+                    channel_dict = channel_info.to_dict()
+                    if channel_dict['path'] not in processed_paths:
+                        channel_groups.append([channel_dict])
+                        processed_paths.add(channel_dict['path'])
     
-    # Process each position group
+    # Add any remaining unprocessed channels as individual groups
+    for _, channel_info in channels_df.iterrows():
+        if channel_info['path'] not in processed_paths:
+            channel_groups.append([channel_info.to_dict()])
+            processed_paths.add(channel_info['path'])
+    
+    # Process each channel group
     merged_data = {}
     
-    for group_key, channels in position_groups.items():
-        print(f"\nProcessing channel group: {group_key} with {len(channels)} paths")
+    for group_idx, channel_group in enumerate(channel_groups):
+        if not channel_group:
+            continue
+            
+        # Generate a group key
+        if len(channel_group) == 1:
+            # Single channel group
+            channel_info = channel_group[0]
+            group_key = f"{channel_info['base_name']}_Ch{channel_info['channel_id']}"
+        else:
+            # Multiple channel group
+            base_names = '_'.join(sorted(set(ch['base_name'] for ch in channel_group)))
+            channels = '_'.join(sorted(set(ch['channel_id'] for ch in channel_group)))
+            group_key = f"{base_names}_Ch{channels}"
+        
+        print(f"\nProcessing channel group {group_idx+1}: {group_key} with {len(channel_group)} paths")
+        
+        # Print all paths in this group
+        for i, ch_info in enumerate(channel_group):
+            print(f"  {i+1}. {ch_info['path']} (cyclename: {ch_info['cyclename']}, channel: {ch_info['channel_id']})")
         
         # Process each channel in this group
         all_data = []
         
-        for idx, channel_info in enumerate(channels):
+        for idx, channel_info in enumerate(channel_group):
             subfolder = channel_info['path']
             cyclename = channel_info['cyclename']
             channel_id = channel_info['channel_id']
             
-            print(f"  Processing subfolder: {subfolder} (cyclename: {cyclename}, channel: {channel_info['channel']})")
+            print(f"  Processing: {subfolder}")
             
-            # Extract data
+            # Extract data using existing functions
             pneProfile = pne_continue_data(subfolder, inicycle, endcycle)
             pneCycle = pne_cyc_continue_data(subfolder)
             
@@ -385,7 +449,7 @@ def concatenate():
                     all_data.append(processed_data)
                     print(f"    Added {processed_data.shape[0]} rows of data for channel {channel_id}")
         
-        # Merge all data for this position group
+        # Merge all data for this group
         if all_data:
             # Concatenate all DataFrames
             group_merged = pd.concat(all_data, ignore_index=True)
