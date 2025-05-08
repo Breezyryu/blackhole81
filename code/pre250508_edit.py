@@ -327,7 +327,7 @@ def identify_channel_groups(cycle_df):
     # 각 경로별 채널 정보 수집
     path_channels = {}  # 키: cyclepath, 값: 발견된 채널 목록
     
-    # 각 경로에서 채널 수집
+    # 각 경로에서 채널 수집 (발견 순서대로)
     for _, row in cycle_df.iterrows():
         path = row['cyclepath']
         
@@ -335,7 +335,7 @@ def identify_channel_groups(cycle_df):
             logger.warning(f"경로가 존재하지 않습니다: {path}")
             continue
             
-        # 하위 폴더 검사
+        # 하위 폴더 검사 (정렬하지 않고 파일 시스템 순서대로)
         subfolders = [f.path for f in os.scandir(path) if f.is_dir() and "Pattern" not in f.path]
         
         # 이 경로에서 발견된 채널 목록
@@ -350,8 +350,8 @@ def identify_channel_groups(cycle_df):
                     'subfolder': subfolder
                 })
         
-        # 채널 ID를 정수로 정렬하여 경로에 저장
-        path_channels[path] = sorted(channels, key=lambda x: int(x['channel_id']))
+        # 발견된 순서 그대로 저장 (정렬하지 않음)
+        path_channels[path] = channels
     
     # 각 기본 사이클 경로별 채널 수 확인
     cycle_channel_counts = {}
@@ -434,7 +434,7 @@ def main():
         for base_cycle, group in cycle_df.groupby('base_cycle'):
             logger.info(f"\n기본 사이클 처리 중: {base_cycle}")
             
-            # cyclename으로 정렬하여 올바른 순서 보장
+            # cyclename으로 정렬하여 올바른 순서 보장 (공백 제거 후 비교)
             group = group.sort_values('cyclename')
             
             # 그룹의 각 경로 처리
@@ -485,55 +485,47 @@ def main():
                                     full_group_key = (cycle_info, group_name)
                                     
                                     # 이 그룹의 컬렉션에 추가
-                                    group_data[full_group_key].append(processed_data)
+                                    group_data[full_group_key].append({
+                                        'cyclename': cycname,
+                                        'data': processed_data,
+                                        'seq_num': int(cycname.split('_')[-1]) if len(cycname.split('_')) > 1 and cycname.split('_')[-1].isdigit() else 0,
+                                        'channel_id': channel_id
+                                    })
                                     logger.info(f"    {group_name}에 데이터 추가됨 (channel_id: {channel_id})")
         
         # 사이클 정보별로 데이터 병합
-        merged_groups = defaultdict(list)
+        merged_groups = {}
         
-        for (cycle_info, group_name), data_list in group_data.items():
-            if data_list:
-                # 메타데이터가 있는 DataFrame 생성
-                group_df_with_metadata = pd.DataFrame({
-                    'cyclename': [df['cyclename'].iloc[0] for df in data_list],
-                    'base_cycle': [df['base_cycle'].iloc[0] for df in data_list],
-                    'data': data_list,
-                    'channel_id': [df['channel_id'].iloc[0] for df in data_list]
-                })
+        for (cycle_info, group_name), data_items in group_data.items():
+            if data_items:
+                # cyclename의 시퀀스 번호로 정렬
+                sorted_data_items = sorted(data_items, key=lambda x: x['seq_num'])
                 
-                # 시퀀스 번호 추출 및 정렬
-                group_df_with_metadata['seq_num'] = group_df_with_metadata['cyclename'].apply(
-                    lambda x: int(x.split('_')[-1]) if len(x.split('_')) > 1 and x.split('_')[-1].isdigit() else 0
-                )
-                
-                # 올바른 순서를 보장하기 위해 시퀀스 번호로 정렬 (1, 2, 3, 등)
-                group_df_with_metadata = group_df_with_metadata.sort_values('seq_num')
+                # 메타데이터 추출
+                cyclenames = [item['cyclename'] for item in sorted_data_items]
+                channel_ids = [item['channel_id'] for item in sorted_data_items]
                 
                 # 정렬된 순서로 DataFrame 연결
-                sorted_data_list = group_df_with_metadata['data'].tolist()
-                group_merged = pd.concat(sorted_data_list, ignore_index=True)
+                data_frames = [item['data'] for item in sorted_data_items]
+                group_merged = pd.concat(data_frames, ignore_index=True)
                 
                 # 누적 시간 계산
                 group_merged['cumulative_time'] = group_merged['time'].cumsum()
                 
-                # 연결된 channel_id 추출 (중복 제거, 오름차순)
-                channel_ids = group_df_with_metadata['channel_id'].astype(str).unique().tolist()
-                channel_ids_sorted = sorted(set(channel_ids), key=lambda x: int(x))
-                channel_id_str = '-'.join(channel_ids_sorted)
+                # 채널 ID를 발견된 순서대로 출력
+                channel_ids_str = '-'.join(channel_ids)
                 
                 # 병합된 데이터 저장
                 merged_groups[(cycle_info, group_name)] = {
                     'data': group_merged,
-                    'channel_ids': channel_ids_sorted,
-                    'base_cycles': group_df_with_metadata['base_cycle'].unique().tolist()
+                    'channel_ids': channel_ids,
+                    'cyclenames': cyclenames
                 }
-        
-        # 각 그룹별로 CSV 출력
-        for (cycle_info, group_name), group_data in merged_groups.items():
-            # CSV로 내보내기
-            output_filename = f"{cycle_info}_{group_name}_ch{'-'.join(group_data['channel_ids'])}_merged_cycles.csv"
-            group_data['data'].to_csv(output_filename, index=False)
-            logger.info(f"{cycle_info}_{group_name}에 대한 병합된 사이클 데이터를 {output_filename}으로 내보냈습니다 (채널: {'-'.join(group_data['channel_ids'])})")
+                
+                # CSV로 내보내기
+                output_filename = f"{cycle_info}_{group_name}_ch{channel_ids_str}_merged_cycles.csv"
+                group_merged.to_csv(output_filename, index=False)
+                logger.info(f"{cycle_info}_{group_name}에 대한 병합된 사이클 데이터를 {output_filename}으로 내보냈습니다 (채널: {channel_ids_str})")
         
         # 처리된 데이터 요약 인쇄
         logger.info("\n데이터 요약:")
