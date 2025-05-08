@@ -171,7 +171,7 @@ def pne_cyc_continue_data(path):
   
         save_end_data_file = next((f for f in subfile if "SaveEndData" in f), None)
         if save_end_data_file:
-                df.Cycrawtemp = pd.read_csv(os.path.join(restore_dir, save_end_data_file), sep=",", skiprows=0, engine="c", header = None, encoding="cp949", on_bad_lines='skip')
+                df = pd.read_csv(os.path.join(restore_dir, save_end_data_file), sep=",", skiprows=0, engine="c", header = None, encoding="cp949", on_bad_lines='skip')
     return df     
 
 
@@ -223,14 +223,12 @@ def concatenate():
         'mincapacity': mincapacity
     })
     
-    # Group the data by cyclename
-    grouped = cycle_df.groupby('cyclename')
+    # Dictionary to store data by channel_key
+    channel_data = {}
     
-    # Dictionary to store all processed data
-    all_cycle_data = []
-    
-    # Process each group
-    for cycname, group in grouped:
+    # Group the data by cyclename and sort the groups by cyclename
+    # This ensures A1_MP1_T23_1 comes before A1_MP1_T23_2, etc.
+    for cycname, group in sorted(cycle_df.groupby('cyclename')):
         print(f"\nProcessing cyclename: {cycname}")
         
         # Process each path in the group
@@ -243,14 +241,14 @@ def concatenate():
             # Debug print
             print(f"Cycle[{cycle_idx}] has {len(subfolders)} subfolders:")
             
-            # Process each subfolder
+            # Process each subfolder (which represents a channel)
             for j, subfolder in enumerate(subfolders):
                 channel, channel_id = extract_channel_number(subfolder)
                 print(f"  subfolder[{j}]\t{subfolder}\tcycle[{cycle_idx}]\t{cycname}\tchannel: {channel}, id: {channel_id}")
                 
                 if channel:
                     # Create a unique key for each channel
-                    channel_key = f"{cycname}_Ch{channel_id}"
+                    channel_key = f"{cycname.split('_')[0]}_Ch{channel_id}"  # Use base name (A1) for the channel key
                     
                     # Extract data
                     pneProfile = pne_continue_data(subfolder, inicycle, endcycle)
@@ -259,10 +257,10 @@ def concatenate():
                     # Process cycle data
                     if not pneCycle.empty:
                         # Filter cycle data
-                        cycle_data = pneCycle.cycrawtemp[
-                            (pneCycle.cycrawtemp[2].isin([1, 2])) & 
-                            (pneCycle.cycrawtemp[27] >= inicycle if inicycle is not None else True) & 
-                            (pneCycle.cycrawtemp[27] <= endcycle if endcycle is not None else True)
+                        cycle_data = pneCycle[
+                            (pneCycle[2].isin([1, 2])) & 
+                            (pneCycle[27] >= inicycle if inicycle is not None else True) & 
+                            (pneCycle[27] <= endcycle if endcycle is not None else True)
                         ]
                         
                         # Select and rename columns
@@ -271,44 +269,60 @@ def concatenate():
                             processed_data.columns = ['time', 'voltage', 'current', 'chg_capacity', 'dchg_capacity']
                             
                             # Add metadata
-                            processed_data['channel_key'] = channel_key
+                            processed_data['cyclename'] = cycname
                             processed_data['cycle_idx'] = cycle_idx
                             processed_data['subfolder'] = subfolder
                             
-                            # Add to the collection
-                            all_cycle_data.append(processed_data)
-                            print(f"Processed cycle data for {channel_key}, cycle {cycle_idx}")
+                            # Initialize channel data if not exists
+                            if channel_key not in channel_data:
+                                channel_data[channel_key] = []
+                            
+                            # Add to the collection for this channel
+                            channel_data[channel_key].append(processed_data)
+                            print(f"Processed cycle data for {channel_key}, cyclename: {cycname}, cycle {cycle_idx}")
     
-    # If we have processed data, merge and export
-    if all_cycle_data:
-        # Concatenate all processed data
-        combined_data = pd.concat(all_cycle_data, ignore_index=True)
-        
-        # Process by channel
-        merged_data = {}
-        for channel_key, channel_group in combined_data.groupby('channel_key'):
-            # Sort by cycle_idx
-            channel_group = channel_group.sort_values('cycle_idx')
+    # Merge data for each channel
+    merged_data = {}
+    
+    # Process each channel's data
+    for channel_key, data_list in channel_data.items():
+        if data_list:
+            # Concatenate all data for this channel
+            channel_df = pd.concat(data_list, ignore_index=True)
             
-            # Calculate cumulative time
-            channel_group['cumulative_time'] = channel_group['time'].cumsum()
+            # Calculate cumulative time within each cyclename
+            result_dfs = []
+            
+            for cyclename, cycle_group in channel_df.groupby('cyclename'):
+                # Sort by cycle_idx within each cyclename group
+                cycle_group = cycle_group.sort_values('cycle_idx')
+                
+                # Calculate cumulative time for this cyclename group
+                cycle_group['cumulative_time'] = cycle_group['time'].cumsum()
+                
+                result_dfs.append(cycle_group)
+            
+            # Concatenate all cyclename groups for this channel
+            channel_merged = pd.concat(result_dfs, ignore_index=True)
             
             # Store merged data
-            merged_data[channel_key] = channel_group
+            merged_data[channel_key] = channel_merged
             
             # Export to CSV
             output_filename = f"{channel_key}_merged_cycles.csv"
-            channel_group.to_csv(output_filename, index=False)
+            channel_merged.to_csv(output_filename, index=False)
             print(f"Exported merged cycle data for {channel_key} to {output_filename}")
-    else:
-        merged_data = {}
-        print("Warning: No data was processed. Check your input paths and cycle numbers.")
     
     # Print a summary
     if merged_data:
         print("\nData summary:")
         for key, df in merged_data.items():
             print(f"  - {key}: {df.shape[0]} rows, {df.shape[1]} columns")
+            # Count unique cyclenames
+            unique_cyclenames = df['cyclename'].nunique()
+            print(f"    Contains data from {unique_cyclenames} cyclenames")
+    else:
+        print("Warning: No data was processed. Check your input paths and cycle numbers.")
     
     print(f"\nProcessed {len(merged_data)} unique channels with data")
     return merged_data
