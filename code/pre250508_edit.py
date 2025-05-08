@@ -450,9 +450,16 @@ def main():
                 
                 # 누적 시간 계산
                 group_merged['cumulative_time'] = group_merged['time'].cumsum()
+
+                # base_cycle 추출 (동일 그룹 내 동일 값)
+                base_cycle = group_df_with_metadata['base_cycle'].iloc[0]
+                # 연결된 channel_id 추출 (중복 제거, 오름차순, str 변환)
+                channel_ids = group_df_with_metadata['channel_id'].astype(str).unique().tolist()
+                channel_ids_sorted = sorted(set(channel_ids), key=lambda x: int(x))
+                channel_id_str = '-'.join(channel_ids_sorted)
                 
-                # CSV로 내보내기
-                output_filename = f"{group_name}_merged_cycles.csv"
+                # CSV로 내보내기 (파일명에 base_cycle, group_name, channel_id)
+                output_filename = f"{base_cycle}_{group_name}_ch{channel_id_str}_merged_cycles.csv"
                 group_merged.to_csv(output_filename, index=False)
                 logger.info(f"{group_name}에 대한 병합된 사이클 데이터를 {output_filename}으로 내보냈습니다")
         
