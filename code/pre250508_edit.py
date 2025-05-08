@@ -213,27 +213,24 @@ def extract_channel_info(path):
         }
     return None
 
-def extract_base_cycle_name(path):
+def extract_cycle_info_from_name(cyclename):
     """
-    경로에서 기본 사이클 이름 추출 (예: A1_MP1_T45_1에서 A1_MP1_T45)
+    사이클 이름에서 기본 사이클 정보 추출 (예: A1_MP1_T23_1에서 A1_MP1_T23)
     
     Args:
-        path (str): 전체 경로
+        cyclename (str): 사이클 이름
         
     Returns:
-        str: 기본 사이클 이름
+        str: 기본 사이클 정보
     """
-    # 경로에서 파일 이름 추출 (경로 구분자 처리)
-    basename = os.path.basename(path)
-    
-    # '_'로 분리하고 성적으로 '_'로 결합
-    parts = basename.split('_')
+    # '_'로 분리하고 맨 마지막 부분 제거 (숫자인 경우)
+    parts = cyclename.split('_')
     
     # 마지막 부분이 숫자인 경우 제외
     if len(parts) > 1 and parts[-1].isdigit():
         return '_'.join(parts[:-1])
     
-    return basename
+    return cyclename
 
 def process_cycle_data(cycle_data, inicycle, endcycle, metadata):
     """
@@ -312,10 +309,9 @@ def identify_channel_groups(cycle_df):
     cycle_info_mapping = {}
     for _, row in cycle_df.iterrows():
         cycname = row['cyclename']
-        base_cycle = row['base_cycle']
         
-        # 사이클 정보 추출 (예: A1_MP1_T23_1 -> A1_MP1_T23)
-        cycle_info = base_cycle
+        # cyclename에서 직접 사이클 정보 추출 (예: A1_MP1_T23_1 -> A1_MP1_T23)
+        cycle_info = extract_cycle_info_from_name(cycname)
         
         # cyclename에 사이클 정보 매핑
         cycle_info_mapping[cycname] = cycle_info
@@ -330,6 +326,8 @@ def identify_channel_groups(cycle_df):
     # 각 경로에서 채널 수집 (발견 순서대로)
     for _, row in cycle_df.iterrows():
         path = row['cyclepath']
+        cycname = row['cyclename']
+        cycle_info = cycle_info_mapping[cycname]
         
         if not os.path.exists(path):
             logger.warning(f"경로가 존재하지 않습니다: {path}")
@@ -355,25 +353,26 @@ def identify_channel_groups(cycle_df):
     
     # 각 기본 사이클 경로별 채널 수 확인
     cycle_channel_counts = {}
-    for base_cycle in unique_cycle_infos:
-        # 이 기본 사이클의 모든 경로 가져오기
+    for cycle_info in unique_cycle_infos:
+        # 이 기본 사이클 정보와 관련된 모든 경로 가져오기
         paths = [row['cyclepath'] for _, row in cycle_df.iterrows() 
-                 if cycle_info_mapping[row['cyclename']] == base_cycle]
+                 if cycle_info_mapping[row['cyclename']] == cycle_info]
         
         # 각 경로의 채널 수
         channel_counts = [len(path_channels.get(path, [])) for path in paths if path in path_channels]
         
         if channel_counts:
             max_channels = max(channel_counts)
-            cycle_channel_counts[base_cycle] = max_channels
-            logger.info(f"기본 사이클 {base_cycle}에 대해 최대 {max_channels}개의 채널 발견")
+            cycle_channel_counts[cycle_info] = max_channels
+            logger.info(f"기본 사이클 {cycle_info}에 대해 최대 {max_channels}개의 채널 발견")
     
     # 채널을 그룹에 할당 (채널 인덱스 -> 그룹 이름)
     channel_to_group = {}
     
     for _, row in cycle_df.iterrows():
         path = row['cyclepath']
-        base_cycle = row['base_cycle']
+        cycname = row['cyclename']
+        cycle_info = cycle_info_mapping[cycname]
         
         if path not in path_channels:
             continue
@@ -389,8 +388,8 @@ def identify_channel_groups(cycle_df):
             # 그룹 이름 (1부터 시작)
             group_name = f"Data#{idx+1}"
             
-            # (기본 사이클, 채널 경로) => 그룹 매핑
-            channel_to_group[(base_cycle, subfolder)] = group_name
+            # (사이클 정보, 채널 경로) => 그룹 매핑
+            channel_to_group[(cycle_info, subfolder)] = group_name
     
     logger.info(f"자동으로 {len(channel_to_group)}개의 채널 그룹이 식별되었습니다.")
     return channel_to_group, cycle_info_mapping
@@ -419,10 +418,6 @@ def main():
             'capacity': capacity
         })
         
-        # 4. 기본 사이클 이름으로 그룹화 (예: A1_MP1_T23)
-        # cyclepath에서 기본 사이클 이름 추출
-        cycle_df['base_cycle'] = cycle_df['cyclepath'].apply(extract_base_cycle_name)
-        
         # 채널 ID에서 그룹으로의 매핑 생성 (자동화)
         channel_to_group, cycle_info_mapping = identify_channel_groups(cycle_df)
         
@@ -430,15 +425,22 @@ def main():
         # 키: (사이클 정보, Data#)
         group_data = defaultdict(list)
         
-        # 5. 각 기본 사이클 그룹 처리
-        for base_cycle, group in cycle_df.groupby('base_cycle'):
-            logger.info(f"\n기본 사이클 처리 중: {base_cycle}")
+        # 고유한 사이클 정보 가져오기
+        unique_cycle_infos = set(cycle_info_mapping.values())
+        
+        # 5. 각 고유 사이클 정보 그룹 처리
+        for cycle_info in unique_cycle_infos:
+            logger.info(f"\n기본 사이클 정보 처리 중: {cycle_info}")
             
-            # cyclename으로 정렬하여 올바른 순서 보장 (공백 제거 후 비교)
-            group = group.sort_values('cyclename')
+            # 이 사이클 정보에 해당하는 모든 행 가져오기
+            info_rows = [row for _, row in cycle_df.iterrows() 
+                        if cycle_info_mapping[row['cyclename']] == cycle_info]
+            
+            # cyclename으로 정렬
+            info_rows.sort(key=lambda x: x['cyclename'])
             
             # 그룹의 각 경로 처리
-            for _, row in group.iterrows():
+            for row in info_rows:
                 path = row['cyclepath']
                 cycname = row['cyclename']
                 
@@ -460,9 +462,9 @@ def main():
                         channel_id = channel_info['channel_id']
                         logger.info(f"  채널 발견: {channel_info['channel']}, ID: {channel_id} (위치: {subfolder})")
                         
-                        # (base_cycle, subfolder) 키를 사용하여 그룹 찾기
-                        if (base_cycle, subfolder) in channel_to_group:
-                            group_name = channel_to_group[(base_cycle, subfolder)]
+                        # (cycle_info, subfolder) 키를 사용하여 그룹 찾기
+                        if (cycle_info, subfolder) in channel_to_group:
+                            group_name = channel_to_group[(cycle_info, subfolder)]
                             
                             # 5-1. 이 채널에 대한 데이터 로드
                             profile_data, cycle_data = load_pne_data(subfolder, inicycle, endcycle)
@@ -471,17 +473,15 @@ def main():
                             if not cycle_data.empty:
                                 metadata = {
                                     'cyclename': cycname,
-                                    'base_cycle': base_cycle,
                                     'subfolder': subfolder,
                                     'channel_id': channel_id,
-                                    'cycle_info': cycle_info_mapping.get(cycname, base_cycle)
+                                    'cycle_info': cycle_info
                                 }
                                 
                                 processed_data = process_cycle_data(cycle_data, inicycle, endcycle, metadata)
                                 
                                 if not processed_data.empty:
                                     # 사이클 정보와 그룹 이름을 조합하여 키 생성
-                                    cycle_info = cycle_info_mapping.get(cycname, base_cycle)
                                     full_group_key = (cycle_info, group_name)
                                     
                                     # 이 그룹의 컬렉션에 추가
