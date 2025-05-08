@@ -343,7 +343,8 @@ def concatenate():
                         'seq_num': seq_num,
                         'channel': channel,
                         'channel_id': channel_id,
-                        'position': position
+                        'position': position,
+                        'channel_int': int(channel)  # Store original channel number as integer
                     })
         except FileNotFoundError:
             print(f"Warning: Path {path} not found, skipping")
@@ -358,59 +359,42 @@ def concatenate():
     channel_groups = []
     processed_paths = set()
     
-    for base_name, group in base_name_groups:
-        # Sort by sequence number and then by channel position
-        group = group.sort_values(['seq_num', 'position'])
+    for base_name, group_df in base_name_groups:
+        # Get unique sequence numbers in this group
+        seq_nums = sorted(group_df['seq_num'].unique())
         
-        # Create groups based on channel position
-        unique_positions = group['position'].unique()
-        
-        for i, pos in enumerate(unique_positions):
-            # Get all channels with this position
-            pos_channels = group[group['position'] == pos]
+        # If only one sequence, process each channel individually
+        if len(seq_nums) == 1:
+            for _, channel_info in group_df.iterrows():
+                channel_dict = channel_info.to_dict()
+                if channel_dict['path'] not in processed_paths:
+                    channel_groups.append([channel_dict])
+                    processed_paths.add(channel_dict['path'])
+            continue
             
-            # If there are multiple sequences, create a group for each sequence position
-            if pos_channels['seq_num'].nunique() > 1:
-                # Get unique sequence numbers
-                seq_nums = sorted(pos_channels['seq_num'].unique())
+        # Group channels by sequence
+        seq_groups = {}
+        for seq_num in seq_nums:
+            # Get all channels for this sequence, sorted by channel number
+            seq_channels = group_df[group_df['seq_num'] == seq_num].sort_values('channel_int').to_dict('records')
+            seq_groups[seq_num] = seq_channels
+        
+        # Match channels across sequences by their relative position (index) within each sequence
+        max_channels = max(len(channels) for channels in seq_groups.values())
+        
+        for idx in range(max_channels):
+            channel_group = []
+            
+            for seq_num in seq_nums:
+                seq_channels = seq_groups[seq_num]
                 
-                # For each sequence position, group channels based on index in the sequence
-                for seq_idx in range(len(seq_nums)):
-                    # Create a new group
-                    seq_group = []
-                    
-                    # For each sequence number, get the channel at the specified position index
-                    for seq_num in seq_nums:
-                        seq_channels = pos_channels[pos_channels['seq_num'] == seq_num]
-                        
-                        # If we have channels for this sequence, add the appropriate one
-                        if not seq_channels.empty:
-                            # Sort channels by position
-                            seq_channels = seq_channels.sort_values('position')
-                            
-                            # If we have enough channels, add the one at the specified index
-                            # Otherwise add the first available channel
-                            if seq_idx < len(seq_channels):
-                                channel_info = seq_channels.iloc[seq_idx].to_dict()
-                                seq_group.append(channel_info)
-                                processed_paths.add(channel_info['path'])
-                    
-                    # Add group if not empty
-                    if seq_group:
-                        channel_groups.append(seq_group)
-            else:
-                # If only one sequence, add each channel as a separate group
-                for _, channel_info in pos_channels.iterrows():
-                    channel_dict = channel_info.to_dict()
-                    if channel_dict['path'] not in processed_paths:
-                        channel_groups.append([channel_dict])
-                        processed_paths.add(channel_dict['path'])
-    
-    # Add any remaining unprocessed channels as individual groups
-    for _, channel_info in channels_df.iterrows():
-        if channel_info['path'] not in processed_paths:
-            channel_groups.append([channel_info.to_dict()])
-            processed_paths.add(channel_info['path'])
+                if idx < len(seq_channels):
+                    channel_dict = seq_channels[idx]
+                    channel_group.append(channel_dict)
+                    processed_paths.add(channel_dict['path'])
+            
+            if channel_group:
+                channel_groups.append(channel_group)
     
     # Create output directory if it doesn't exist
     output_dir = "merged_data"
